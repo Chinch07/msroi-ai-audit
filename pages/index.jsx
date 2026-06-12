@@ -544,9 +544,6 @@ function PasswordGate({ children }) {
 }
 function AuditApp() {
   const [url, setUrl] = useState("");
-  const [ahrefsKey, setAhrefsKey] = useState("");
-  const [showKeyInput, setShowKeyInput] = useState(false);
-  const [keyInputValue, setKeyInputValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
   const [result, setResult] = useState(null);
@@ -556,27 +553,11 @@ function AuditApp() {
 
   useEffect(() => {
     setMounted(true);
-    // Load saved Ahrefs key from persistent storage
-    (async () => {
-      try {
-        const saved = sessionStorage.getItem("ahrefs_mcp_key");
-        if (saved) setAhrefsKey(saved);
-      } catch(e) { /* no key saved yet */ }
-    })();
-    // Secret keyboard shortcut: Shift+Ctrl+A to open Ahrefs key settings
-    const handleKeyDown = (e) => {
-      if (e.shiftKey && e.ctrlKey && e.key === 'A') {
-        setKeyInputValue(ahrefsKey);
-        setShowKeyInput(prev => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-
+    setMounted(true);
     const script = document.createElement("script");
     script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
     script.onload = () => setJsPDFReady(true);
     document.head.appendChild(script);
-    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   if (!mounted) return null;
@@ -587,14 +568,9 @@ function AuditApp() {
     let normalizedUrl = url.trim();
     if (!normalizedUrl.startsWith("http")) normalizedUrl = "https://" + normalizedUrl;
     setStatus("Researching website…");
-    const ahrefsInstruction = ahrefsKey
-      ? "IMPORTANT: You have access to the Ahrefs MCP server. Use the Ahrefs keywords explorer tool to look up real search volume, keyword difficulty (KD 0-100), and intent for EVERY keyword you recommend. Include real Ahrefs data in target_keywords items — set from_ahrefs: true, include difficulty as integer 0-100, volume as plain number e.g. 2400/mo with no ~ prefix. Also use Ahrefs site explorer to get real domain_rating, organic_traffic, organic_keywords, backlinks, referring_domains for ahrefs_data."
-      : "Estimate keyword monthly search volumes as plain numbers e.g. 2400/mo — no ~ prefix.";
 
     const systemPrompt = `You are an expert AI visibility and digital marketing analyst for ${BRAND.agencyName}.
 You evaluate websites for their readiness to appear in AI-powered search platforms: ChatGPT, Google Gemini, Claude, and Perplexity.
-
-${ahrefsInstruction}
 
 Use web search to research the given website thoroughly, then return ONLY a JSON audit report with NO markdown fences.
 
@@ -695,6 +671,45 @@ Return ONLY valid JSON. No commentary before or after.`;
 
       setResult(parsed); setStatus("");
 
+      // Always fetch real Ahrefs keyword data server-side (key is in env vars)
+      if (parsed.target_keywords?.items?.length > 0) {
+        try {
+          const kwList = parsed.target_keywords.items.map(k => k.keyword).join(", ");
+          const kwResponse = await fetch("/api/ahrefs-keywords", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ keywords: kwList })
+          });
+          if (kwResponse.ok) {
+            const kwData = await kwResponse.json();
+            if (kwData.items && Array.isArray(kwData.items) && kwData.items.length > 0) {
+              setResult(prev => {
+                if (!prev) return prev;
+                const updated = { ...prev };
+                updated.target_keywords = { ...prev.target_keywords };
+                updated.target_keywords.items = prev.target_keywords.items.map(item => {
+                  const match = kwData.items.find(k =>
+                    k.keyword?.toLowerCase() === item.keyword?.toLowerCase()
+                  );
+                  if (match) {
+                    return {
+                      ...item,
+                      volume: match.volume ? String(match.volume).replace(/^~/, "") : item.volume,
+                      difficulty: match.difficulty ?? null,
+                      intent: match.intent || item.intent,
+                      from_ahrefs: true,
+                    };
+                  }
+                  return item;
+                });
+                updated.target_keywords.real_data = true;
+                return updated;
+              });
+            }
+          }
+        } catch(e) { console.warn("Keyword enrichment failed:", e.message); }
+      }
+
     } catch(e) {
       setError(e.message || "Something went wrong.");
     } finally { setLoading(false); }
@@ -734,64 +749,8 @@ Return ONLY valid JSON. No commentary before or after.`;
         </div>
       </div>
 
-      {/* Hidden Ahrefs Key Settings — access with Shift+Ctrl+A */}
-      {showKeyInput && (
-        <div style={{ position:"fixed", top:0, left:0, right:0, bottom:0, background:"rgba(0,0,0,0.5)",
-          zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center" }}
-          onClick={() => setShowKeyInput(false)}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ background: BRAND.card, borderRadius:12, padding:28, width:480,
-              boxShadow:"0 8px 32px rgba(0,0,0,0.2)", border:`1px solid ${BRAND.border}` }}>
-            <div style={{ fontSize:14, fontWeight:700, color: BRAND.headingColor,
-              marginBottom:6, fontFamily: BRAND.headingFont }}>⚙ Ahrefs MCP Key</div>
-            <div style={{ fontSize:12, color: BRAND.textMuted, marginBottom:16 }}>
-              {ahrefsKey ? "✓ Key is saved. Paste a new key to update." : "No key saved. Paste your Ahrefs MCP key below."}
-            </div>
-            <input type="password" value={keyInputValue} autoFocus
-              onChange={e => setKeyInputValue(e.target.value)}
-              onKeyDown={async e => {
-                if (e.key === "Enter") {
-                  const k = keyInputValue.trim();
-                  setAhrefsKey(k);
-                  try { sessionStorage.setItem("ahrefs_mcp_key", k); } catch(err) {}
-                  setShowKeyInput(false);
-                }
-                if (e.key === "Escape") setShowKeyInput(false);
-              }}
-              placeholder="Paste your Ahrefs MCP key here"
-              style={{ width:"100%", padding:"10px 14px", border:`1px solid ${BRAND.border}`,
-                borderRadius:8, fontSize:13, color: BRAND.text, background: BRAND.bg,
-                marginBottom:12 }} />
-            <div style={{ display:"flex", gap:10 }}>
-              <button onClick={async () => {
-                  const k = keyInputValue.trim();
-                  setAhrefsKey(k);
-                  try { sessionStorage.setItem("ahrefs_mcp_key", k); } catch(err) {}
-                  setShowKeyInput(false);
-                }}
-                style={{ flex:1, background: BRAND.primary, color:"#fff", border:"none",
-                  borderRadius:8, padding:"10px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
-                Save Key
-              </button>
-              {ahrefsKey && (
-                <button onClick={async () => {
-                    setAhrefsKey(""); setKeyInputValue("");
-                    try { sessionStorage.removeItem("ahrefs_mcp_key"); } catch(err) {}
-                    setShowKeyInput(false);
-                  }}
-                  style={{ background:"transparent", border:`1px solid ${BRAND.bad}`,
-                    color: BRAND.bad, borderRadius:8, padding:"10px 16px",
-                    fontSize:12, fontWeight:600, cursor:"pointer" }}>
-                  Remove
-                </button>
-              )}
-            </div>
-            <div style={{ marginTop:10, fontSize:11, color: BRAND.textDim, textAlign:"center" }}>
-              Press Esc to close · Shift+Ctrl+A to reopen
-            </div>
-          </div>
-        </div>
-      )}
+      
+      
       {/* Hero band */}
       <div style={{ background: BRAND.heroBg, padding:"28px 40px 24px" }}>
         <h1 style={{ fontFamily: BRAND.headingFont, color: BRAND.heroText,
