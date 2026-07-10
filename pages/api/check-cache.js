@@ -1,4 +1,4 @@
-import { list } from '@vercel/blob';
+import { list, download } from '@vercel/blob';
 
 const CACHE_TTL_MS = 78 * 60 * 60 * 1000;
 
@@ -20,8 +20,9 @@ export default async function handler(req, res) {
     const cacheKey = urlToCacheKey(url);
     const { blobs } = await list({ prefix: cacheKey });
     if (!blobs.length) return res.status(200).json({ hit: false });
-    const response = await fetch(blobs[0].url);
-    const data = await response.json();
+    const blob = await download(blobs[0].url);
+    const text = await blob.text();
+    const data = JSON.parse(text);
     const age = Date.now() - new Date(data.cachedAt).getTime();
     if (age > CACHE_TTL_MS) return res.status(200).json({ hit: false });
     return res.status(200).json({ hit: true, result: data });
