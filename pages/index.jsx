@@ -689,16 +689,12 @@ Return ONLY valid JSON. No commentary before or after.`;
               if (kwRes.ok) {
                 const kwData = await kwRes.json();
                 if (kwData.items?.length > 0) {
-                  setResult(prev => {
-                    if (!prev) return prev;
-                    const updated = { ...prev, target_keywords: { ...prev.target_keywords } };
-                    updated.target_keywords.items = prev.target_keywords.items.map(item => {
-                      const match = kwData.items.find(k => k.keyword?.toLowerCase() === item.keyword?.toLowerCase());
-                      return match ? { ...item, volume: String(match.volume||"").replace(/^~/,""), difficulty: match.difficulty??null, intent: match.intent||item.intent, from_ahrefs: true } : item;
-                    });
-                    parsedForCache = updated;
-                    return updated;
+                  const enrichedItems = parsedForCache.target_keywords.items.map(item => {
+                    const match = kwData.items.find(k => k.keyword?.toLowerCase() === item.keyword?.toLowerCase());
+                    return match ? { ...item, volume: String(match.volume||"").replace(/^~/,""), difficulty: match.difficulty??null, intent: match.intent||item.intent, from_ahrefs: true } : item;
                   });
+                  parsedForCache = { ...parsedForCache, target_keywords: { ...parsedForCache.target_keywords, items: enrichedItems } };
+                  setResult(parsedForCache);
                 }
               }
             } catch(e) { console.warn("KW enrichment failed:", e.message); }
