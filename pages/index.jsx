@@ -699,14 +699,12 @@ Return ONLY valid JSON. No commentary before or after.`;
               }
             } catch(e) { console.warn("KW enrichment failed:", e.message); }
           }
-          // Save to cache after Ahrefs enrichment completes
-          setTimeout(() => {
-            fetch("/api/save-cache", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ url: normalizedUrl, result: parsedForCache2 })
-            }).catch(e => console.warn("Cache save failed:", e.message));
-          }, 2000);
+          // Save to cache after Ahrefs enrichment
+          fetch("/api/save-cache", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: normalizedUrl, result: parsedForCache })
+          }).catch(e => console.warn("Cache save failed:", e.message));
           break;
         }
 
