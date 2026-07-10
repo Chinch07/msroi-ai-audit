@@ -677,35 +677,35 @@ Return ONLY valid JSON. No commentary before or after.`;
         if (data.__cached && data.result) {
           setStatus("Loading from cache…");
           const parsed = data.result;
-          setResult(parsed);
-          setStatus("");
-          if (parsed.target_keywords?.items?.length > 0) {
-            try {
-              const kwList = parsed.target_keywords.items.map(k => k.keyword).join(", ");
-              const kwRes = await fetch("/api/ahrefs-keywords", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ keywords: kwList })
+          let parsedForCache = { ...parsed };
+      setResult(parsedForCache);
+      setStatus("");
+      if (parsedForCache.target_keywords?.items?.length > 0) {
+        try {
+          const kwList = parsedForCache.target_keywords.items.map(k => k.keyword).join(", ");
+          const kwRes = await fetch("/api/ahrefs-keywords", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ keywords: kwList })
+          });
+          if (kwRes.ok) {
+            const kwData = await kwRes.json();
+            if (kwData.items?.length > 0) {
+              const enrichedItems = parsedForCache.target_keywords.items.map(item => {
+                const match = kwData.items.find(k => k.keyword?.toLowerCase() === item.keyword?.toLowerCase());
+                return match ? { ...item, volume: String(match.volume||"").replace(/^~/,""), difficulty: match.difficulty??null, intent: match.intent||item.intent, from_ahrefs: true } : item;
               });
-              if (kwRes.ok) {
-                const kwData = await kwRes.json();
-                if (kwData.items?.length > 0) {
-                  const enrichedItems = parsedForCache.target_keywords.items.map(item => {
-                    const match = kwData.items.find(k => k.keyword?.toLowerCase() === item.keyword?.toLowerCase());
-                    return match ? { ...item, volume: String(match.volume||"").replace(/^~/,""), difficulty: match.difficulty??null, intent: match.intent||item.intent, from_ahrefs: true } : item;
-                  });
-                  parsedForCache = { ...parsedForCache, target_keywords: { ...parsedForCache.target_keywords, items: enrichedItems } };
-                  setResult(parsedForCache);
-                }
-              }
-            } catch(e) { console.warn("KW enrichment failed:", e.message); }
+              parsedForCache = { ...parsedForCache, target_keywords: { ...parsedForCache.target_keywords, items: enrichedItems } };
+              setResult(parsedForCache);
+            }
           }
-          // Save to cache after Ahrefs enrichment
-          fetch("/api/save-cache", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: normalizedUrl, result: parsedForCache })
-          }).catch(e => console.warn("Cache save failed:", e.message));
-          break;
+        } catch(e) { console.warn("KW enrichment failed:", e.message); }
+      }
+      fetch("/api/save-cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: normalizedUrl, result: parsedForCache })
+      }).catch(e => console.warn("Cache save failed:", e.message));
+      break;
         }
 
         if (data.error) throw new Error(`API Error [${data.error.type}]: ${data.error.message}`);
