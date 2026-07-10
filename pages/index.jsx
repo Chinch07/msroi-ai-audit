@@ -570,6 +570,25 @@ function AuditApp() {
     setStatus("Checking cache…");
     await new Promise(r => setTimeout(r, 100));
     setStatus("Checking cache…");
+    // Check cache first
+    setStatus("Checking cache…");
+    try {
+      const cacheRes = await fetch("/api/check-cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: normalizedUrl })
+      });
+      if (cacheRes.ok) {
+        const cacheData = await cacheRes.json();
+        if (cacheData.hit && cacheData.result) {
+          setResult(cacheData.result);
+          setStatus("");
+          setLoading(false);
+          return;
+        }
+      }
+    } catch(e) { console.warn("Cache check failed:", e.message); }
+
     setStatus("Researching website…");
 
     const systemPrompt = `You are an expert AI visibility and digital marketing analyst for ${BRAND.agencyName}.
@@ -706,6 +725,11 @@ Return ONLY valid JSON. No commentary before or after.`;
       catch(e) { throw new Error("JSON parse failed: " + e.message); }
 
       setResult(parsed); setStatus("");
+      fetch("/api/save-cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: normalizedUrl, result: parsed })
+      }).catch(e => console.warn("Cache save failed:", e.message));
 
       // Always fetch real Ahrefs keyword data server-side (key is in env vars)
       if (parsed.target_keywords?.items?.length > 0) {
