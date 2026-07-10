@@ -676,8 +676,31 @@ Return ONLY valid JSON. No commentary before or after.`;
         // ── Cache HIT — render immediately and skip loop ──
         if (data.__cached && data.result) {
           setStatus("Loading from cache…");
-          const parsed = data.result;
-          let parsedForCache = { ...parsed };
+          setResult(data.result);
+          setStatus("");
+          break;
+        }
+
+        if (data.error) throw new Error(`API Error [${data.error.type}]: ${data.error.message}`);
+        if (data.stop_reason === "end_turn") break;
+        if (data.stop_reason === "tool_use") {
+          setStatus(`Researching website… (pass ${iterations})`);
+          messages.push({ role:"assistant", content:data.content });
+          messages.push({ role:"user", content:"Please continue and return the complete JSON audit report now." });
+        } else { break; }
+      }
+      setStatus("Building your report…");
+      if (!data) throw new Error("No response received.");
+      const textBlocks = (data.content||[]).filter(b => b.type==="text");
+      const raw = textBlocks.map(b => b.text).join("");
+      const cleaned = raw.replace(/```json\s*/gi,"").replace(/```\s*/g,"").trim();
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("No JSON found. Raw: " + raw.slice(0,300));
+      let parsed;
+      try { parsed = JSON.parse(jsonMatch[0]); }
+      catch(e) { throw new Error("JSON parse failed: " + e.message); }
+
+      let parsedForCache = { ...parsed };
       setResult(parsedForCache);
       setStatus("");
       if (parsedForCache.target_keywords?.items?.length > 0) {
@@ -705,29 +728,6 @@ Return ONLY valid JSON. No commentary before or after.`;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: normalizedUrl, result: parsedForCache })
       }).catch(e => console.warn("Cache save failed:", e.message));
-      break;
-        }
-
-        if (data.error) throw new Error(`API Error [${data.error.type}]: ${data.error.message}`);
-        if (data.stop_reason === "end_turn") break;
-        if (data.stop_reason === "tool_use") {
-          setStatus(`Researching website… (pass ${iterations})`);
-          messages.push({ role:"assistant", content:data.content });
-          messages.push({ role:"user", content:"Please continue and return the complete JSON audit report now." });
-        } else { break; }
-      }
-      setStatus("Building your report…");
-      if (!data) throw new Error("No response received.");
-      const textBlocks = (data.content||[]).filter(b => b.type==="text");
-      const raw = textBlocks.map(b => b.text).join("");
-      const cleaned = raw.replace(/```json\s*/gi,"").replace(/```\s*/g,"").trim();
-      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("No JSON found. Raw: " + raw.slice(0,300));
-      let parsed;
-      try { parsed = JSON.parse(jsonMatch[0]); }
-      catch(e) { throw new Error("JSON parse failed: " + e.message); }
-
-      setResult(parsed); setStatus("");
       let parsedForCache2 = parsed;
 
       // Always fetch real Ahrefs keyword data server-side (key is in env vars)
