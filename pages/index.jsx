@@ -567,6 +567,9 @@ function AuditApp() {
     setLoading(true); setError(""); setResult(null);
     let normalizedUrl = url.trim();
     if (!normalizedUrl.startsWith("http")) normalizedUrl = "https://" + normalizedUrl;
+    setStatus("Checking cache…");
+    await new Promise(r => setTimeout(r, 100));
+    setStatus("Checking cache…");
     setStatus("Researching website…");
 
     const systemPrompt = `You are an expert AI visibility and digital marketing analyst for ${BRAND.agencyName}.
@@ -643,13 +646,46 @@ Return ONLY valid JSON. No commentary before or after.`;
         const response = await fetch("/api/audit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages, system: systemPrompt })
+          body: JSON.stringify({ messages, system: systemPrompt, url: normalizedUrl })
         });
         const responseText = await response.text();
         let dataParsed;
         try { dataParsed = JSON.parse(responseText); }
         catch(e) { throw new Error("Non-JSON response (" + response.status + "): " + responseText.slice(0,300)); }
         data = dataParsed;
+
+        // ── Cache HIT — render immediately and skip loop ──
+        if (data.__cached && data.result) {
+          setStatus("Loading from cache…");
+          const parsed = data.result;
+          setResult(parsed);
+          setStatus("");
+          if (parsed.target_keywords?.items?.length > 0) {
+            try {
+              const kwList = parsed.target_keywords.items.map(k => k.keyword).join(", ");
+              const kwRes = await fetch("/api/ahrefs-keywords", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ keywords: kwList })
+              });
+              if (kwRes.ok) {
+                const kwData = await kwRes.json();
+                if (kwData.items?.length > 0) {
+                  setResult(prev => {
+                    if (!prev) return prev;
+                    const updated = { ...prev, target_keywords: { ...prev.target_keywords } };
+                    updated.target_keywords.items = prev.target_keywords.items.map(item => {
+                      const match = kwData.items.find(k => k.keyword?.toLowerCase() === item.keyword?.toLowerCase());
+                      return match ? { ...item, volume: String(match.volume||"").replace(/^~/,""), difficulty: match.difficulty??null, intent: match.intent||item.intent, from_ahrefs: true } : item;
+                    });
+                    return updated;
+                  });
+                }
+              }
+            } catch(e) { console.warn("KW enrichment failed:", e.message); }
+          }
+          break;
+        }
+
         if (data.error) throw new Error(`API Error [${data.error.type}]: ${data.error.message}`);
         if (data.stop_reason === "end_turn") break;
         if (data.stop_reason === "tool_use") {
