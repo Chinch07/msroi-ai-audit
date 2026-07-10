@@ -14,15 +14,16 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false });
   try {
     const { url, result } = req.body;
-    if (!url || !result) return res.status(400).json({ ok: false });
+    if (!url || !result) return res.status(400).json({ ok: false, error: 'Missing url or result' });
+    const cacheKey = urlToCacheKey(url);
     const payload = { ...result, cachedAt: new Date().toISOString() };
-    await put(urlToCacheKey(url), JSON.stringify(payload), {
+    const blob = await put(cacheKey, JSON.stringify(payload), {
       access: 'public',
       contentType: 'application/json',
       addRandomSuffix: false,
     });
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({ ok: true, url: blob.url });
   } catch (e) {
-    return res.status(200).json({ ok: false });
+    return res.status(200).json({ ok: false, error: e.message, stack: e.stack });
   }
 }
