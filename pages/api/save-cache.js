@@ -15,10 +15,9 @@ export default async function handler(req, res) {
   try {
     const { url, result } = req.body;
     if (!url || !result) return res.status(400).json({ ok: false });
-    const cacheKey = urlToCacheKey(url);
     const payload = { ...result, cachedAt: new Date().toISOString() };
-    await put(cacheKey, JSON.stringify(payload), {
-      access: 'private',
+    await put(urlToCacheKey(url), JSON.stringify(payload), {
+      access: 'public',
       contentType: 'application/json',
       addRandomSuffix: false,
     });
