@@ -696,12 +696,19 @@ Return ONLY valid JSON. No commentary before or after.`;
                       const match = kwData.items.find(k => k.keyword?.toLowerCase() === item.keyword?.toLowerCase());
                       return match ? { ...item, volume: String(match.volume||"").replace(/^~/,""), difficulty: match.difficulty??null, intent: match.intent||item.intent, from_ahrefs: true } : item;
                     });
+                    parsedForCache = updated;
                     return updated;
                   });
                 }
               }
             } catch(e) { console.warn("KW enrichment failed:", e.message); }
           }
+          // Save to cache AFTER Ahrefs enrichment so keyword data is included
+          fetch("/api/save-cache", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: normalizedUrl, result: parsedForCache })
+          }).catch(e => console.warn("Cache save failed:", e.message));
           break;
         }
 
@@ -725,11 +732,6 @@ Return ONLY valid JSON. No commentary before or after.`;
       catch(e) { throw new Error("JSON parse failed: " + e.message); }
 
       setResult(parsed); setStatus("");
-      fetch("/api/save-cache", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: normalizedUrl, result: parsed })
-      }).catch(e => console.warn("Cache save failed:", e.message));
 
       // Always fetch real Ahrefs keyword data server-side (key is in env vars)
       if (parsed.target_keywords?.items?.length > 0) {
