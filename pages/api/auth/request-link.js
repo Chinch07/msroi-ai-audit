@@ -15,7 +15,13 @@ export default async function handler(req, res) {
   // enumerate who has access — the link is only ever emailed to an address
   // that actually resolved to a role.
   const role = resolveRole(email);
-  if (!role) return res.status(200).json({ ok: true });
+  // TEMP DIAGNOSTIC — remove before merging to main.
+  console.log('[request-link] email=%j role=%j internalRaw=%j memberRaw=%j',
+    email, role, process.env.INTERNAL_ALLOWLIST, process.env.MEMBER_ALLOWLIST);
+  if (!role) {
+    console.log('[request-link] REJECTED: no role resolved');
+    return res.status(200).json({ ok: true });
+  }
 
   try {
     const address = email.trim().toLowerCase();
@@ -24,7 +30,10 @@ export default async function handler(req, res) {
     // be looped to mail-bomb an address or burn Resend quota. Same 200
     // response either way — a rate-limited request isn't distinguishable
     // from a normal one, it just doesn't trigger a new send.
-    if (!(await allowLinkRequest(address))) return res.status(200).json({ ok: true });
+    if (!(await allowLinkRequest(address))) {
+      console.log('[request-link] REJECTED: cooldown active for %j', address);
+      return res.status(200).json({ ok: true });
+    }
 
     const token = createMagicToken(address, role);
     // Where to land after sign-in — set when the user arrived from a gated
@@ -50,6 +59,7 @@ export default async function handler(req, res) {
       </div>`,
     });
 
+    console.log('[request-link] SENT to %j as %j', address, role);
     return res.status(200).json({ ok: true });
   } catch (e) {
     console.error('request-link error:', e);
