@@ -1,7 +1,16 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: #f7f9f7; }
 input:focus { outline: none; }
-input::placeholder { color: #bbb; }
+input::placeholder { color: #a8b0a8; }
+
+/* Focus is ink, never the brand green — a focused element must not read as
+   a success state, and the green is reserved for CTAs. */
+:focus-visible {
+  outline: 2px solid #1a1a1a;
+  outline-offset: 3px;
+}
+::selection { background: #007513; color: #ffffff; }
+
 @keyframes bounce {
   0%, 80%, 100% { transform: translateY(0); opacity: .5; }
   40% { transform: translateY(-6px); opacity: 1; }
@@ -9,4 +18,41 @@ input::placeholder { color: #bbb; }
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* "Export PDF" is window.print() (see exportToPDF in components/AuditReport.jsx)
+   — this block is what actually produces the export. It hides everything
+   except the report, so the browser's print/save-as-PDF dialog shows the
+   audit and nothing else. #url-input-section / #audit-results are set via
+   Card's `id` prop; .factor-card via FactorCard's className; .no-print is
+   used by PreviewLink and the "run a new audit" links. */
+@media print {
+  header, footer, #url-input-section, button, .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: #fff !important;
+    margin: 0;
+    padding: 0;
+  }
+
+  #audit-results {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Score rings and expandable cards shouldn't split across a page break. */
+  svg,
+  .factor-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
 }
