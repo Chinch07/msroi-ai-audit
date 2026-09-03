@@ -1,21 +1,37 @@
 import { getCachedAudit, setCachedAudit } from '../../lib/audit-cache';
-import { getSession, verifyCreditToken } from '../../lib/auth';
+import { getSession, verifyCreditToken, ROLE } from '../../lib/auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { messages, system, url, auditToken } = req.body || {};
 
-  // Authorize before doing any paid work. Internal users are gated by their
-  // session cookie (unlimited); the public /free-audit flow must present a
-  // credit token minted by /api/check-credits, which only issues one after a
-  // real credit is spent, bound to this exact url, and consumable for only
-  // a bounded number of calls. A direct POST with neither is rejected, so
-  // the 3-credit limit can't be bypassed by calling this endpoint straight.
-  if (!getSession(req)) {
+  // Authorize before doing any paid work.
+  //
+  // Three tiers, and only ONE of them is unlimited:
+  //   internal — session cookie alone is sufficient.
+  //   member   — signed in, but still must present a credit token from
+  //              /api/member-credit. The session proves who they are; the
+  //              token proves they had quota left. Accepting the session on
+  //              its own here would make the monthly cap a browser-side
+  //              suggestion that devtools could skip straight past.
+  //   public   — no session; must present a credit token from
+  //              /api/check-credits (the 3-lifetime-audit pool).
+  //
+  // Both token paths are bound to this exact url and consumable for only a
+  // bounded number of calls, so a captured token can't be redirected at
+  // another site or replayed indefinitely.
+  const session = getSession(req);
+  if (!session || session.role === ROLE.MEMBER) {
     const credit = await verifyCreditToken(auditToken, url);
     if (!credit) {
       return res.status(401).json({ error: 'A valid session or audit credit is required.' });
+    }
+    // A member's token must belong to that member. Without this, one member
+    // could drive their whole run on another member's freshly-issued token
+    // and drain someone else's monthly quota.
+    if (session && credit.email !== session.email) {
+      return res.status(403).json({ error: 'This audit credit belongs to a different account.' });
     }
   }
 

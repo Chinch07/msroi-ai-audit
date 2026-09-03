@@ -18,9 +18,9 @@ function errorPage(message) {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign-in link problem</title></head>
   <body style="font-family:Arial,sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
     <div style="background:#fff;border:1px solid #e5e5e5;border-radius:12px;padding:40px;max-width:400px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
-      <h2 style="color:#cc0000;margin:0 0 8px;font-size:20px;">Link expired or invalid</h2>
+      <h2 style="color:#007513;margin:0 0 8px;font-size:20px;">Link expired or invalid</h2>
       <p style="color:#666;font-size:14px;line-height:1.5;margin:0 0 24px;">${message}</p>
-      <a href="/login" style="background:#cc0000;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;font-size:14px;display:inline-block;">Request a new link</a>
+      <a href="/login" style="background:#007513;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;font-size:14px;display:inline-block;">Request a new link</a>
     </div>
   </body></html>`;
 }
@@ -36,10 +36,10 @@ function confirmPage(token, email, nextPath) {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm sign-in</title></head>
   <body style="font-family:Arial,sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
     <div style="background:#fff;border:1px solid #e5e5e5;border-radius:12px;padding:40px;max-width:400px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
-      <h2 style="color:#cc0000;margin:0 0 8px;font-size:20px;">AI Visibility Audit</h2>
+      <h2 style="color:#007513;margin:0 0 8px;font-size:20px;">AI Visibility Audit</h2>
       <p style="color:#666;font-size:14px;line-height:1.5;margin:0 0 24px;">Signing in as <strong>${escapeHtml(email)}</strong>. Click below to finish.</p>
       <form method="POST" action="/api/auth/verify?token=${encodeURIComponent(token)}${nextPath ? '&amp;next=' + encodeURIComponent(nextPath) : ''}">
-        <button type="submit" style="background:#cc0000;color:#fff;border:none;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;font-size:14px;display:inline-block;cursor:pointer;">Sign in →</button>
+        <button type="submit" style="background:#007513;color:#fff;border:none;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;font-size:14px;display:inline-block;cursor:pointer;">Sign in →</button>
       </form>
     </div>
   </body></html>`;
@@ -76,7 +76,10 @@ export default async function handler(req, res) {
       .send(errorPage('This sign-in link is invalid or has expired. Sign-in links are valid for 15 minutes.'));
   }
 
-  const session = createSessionToken(result.email);
+  // The role was fixed when the link was minted, so a member's link can
+  // never be exchanged for an internal session even if the allowlists
+  // change between the email being sent and the link being clicked.
+  const session = createSessionToken(result.email, result.role);
   res.setHeader('Set-Cookie', sessionCookieHeader(session, req));
   res.writeHead(302, { Location: nextPath || '/' });
   res.end();

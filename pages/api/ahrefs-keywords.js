@@ -1,10 +1,12 @@
-import { requireSession } from '../../lib/auth';
+import { requireSession, ROLE } from '../../lib/auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  // Internal-only endpoint (Ahrefs spend). The public /free-audit flow never
-  // calls this — only the authenticated internal tool does.
-  if (!requireSession(req, res)) return;
+  // Internal-only endpoint: every call spends Ahrefs quota, so it's gated to
+  // staff rather than to any signed-in account. Members get the audit report
+  // without live Ahrefs keyword enrichment; the public /free-audit flow never
+  // reaches this at all.
+  if (!requireSession(req, res, { role: ROLE.INTERNAL })) return;
   const mcpKey = process.env.AHREFS_MCP_KEY;
   if (!mcpKey) return res.status(200).json({ items: [] });
   try {

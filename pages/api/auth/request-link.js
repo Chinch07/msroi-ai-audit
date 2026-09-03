@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
-import { createMagicToken, isEmailAllowed, allowLinkRequest, baseUrl, safeNextPath } from '../../../lib/auth';
+import { createMagicToken, resolveRole, allowLinkRequest, baseUrl, safeNextPath } from '../../../lib/auth';
+import { AGENCY } from '../../../lib/agency';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const MAIL_FROM = process.env.MAIL_FROM || 'AI Audit <onboarding@resend.dev>';
@@ -9,10 +10,12 @@ export default async function handler(req, res) {
 
   const { email, next } = req.body || {};
 
-  // Respond identically whether or not the email is allowed, so this endpoint
-  // can't be used to enumerate who has access. The link is only ever emailed
-  // to an allowlisted address.
-  if (!isEmailAllowed(email)) return res.status(200).json({ ok: true });
+  // Resolve which tier this address signs in as. Responds identically for
+  // allowed and disallowed addresses, so the endpoint can't be used to
+  // enumerate who has access — the link is only ever emailed to an address
+  // that actually resolved to a role.
+  const role = resolveRole(email);
+  if (!role) return res.status(200).json({ ok: true });
 
   try {
     const address = email.trim().toLowerCase();
@@ -23,7 +26,7 @@ export default async function handler(req, res) {
     // from a normal one, it just doesn't trigger a new send.
     if (!(await allowLinkRequest(address))) return res.status(200).json({ ok: true });
 
-    const token = createMagicToken(address);
+    const token = createMagicToken(address, role);
     // Where to land after sign-in — set when the user arrived from a gated
     // page such as an /audit/<id> preview link. Validated here (and again in
     // verify.js before the redirect actually happens) so the emailed link
@@ -36,12 +39,12 @@ export default async function handler(req, res) {
     await resend.emails.send({
       from: MAIL_FROM,
       to: address,
-      subject: 'Your AI Visibility Audit sign-in link',
+      subject: `Your ${AGENCY.toolName} sign-in link`,
       html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;">
-        <h2 style="color:#cc0000;margin:0 0 8px;">AI Visibility Audit</h2>
-        <p style="color:#333;font-size:14px;line-height:1.5;">Click the button below to sign in to the internal audit tool. This link expires in 15 minutes and can only be used from this email.</p>
+        <h2 style="color:#007513;margin:0 0 8px;">${AGENCY.toolName}</h2>
+        <p style="color:#333;font-size:14px;line-height:1.5;">Click the button below to sign in. This link expires in 15 minutes and can only be used once.</p>
         <p style="margin:24px 0;">
-          <a href="${link}" style="background:#cc0000;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;font-size:14px;display:inline-block;">Sign in →</a>
+          <a href="${link}" style="background:#007513;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;font-size:14px;display:inline-block;">Sign in →</a>
         </p>
         <p style="color:#888;font-size:12px;line-height:1.5;">If you didn't request this, you can ignore this email. If the button doesn't work, paste this URL into your browser:<br><span style="color:#666;word-break:break-all;">${link}</span></p>
       </div>`,

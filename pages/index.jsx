@@ -8,6 +8,7 @@ import AppHeader from "../components/AppHeader";
 import AppFooter from "../components/AppFooter";
 import AuditReport from "../components/AuditReport";
 import PreviewLink from "../components/PreviewLink";
+import QuotaBadge from "../components/QuotaBadge";
 import { AGENCY } from "../lib/agency";
 
 function LoadingDots() {
@@ -23,7 +24,7 @@ function LoadingDots() {
 
 
 
-function AuditApp({ userEmail }) {
+function AuditApp({ userEmail, role }) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
@@ -35,6 +36,11 @@ function AuditApp({ userEmail }) {
   const [auditId, setAuditId] = useState(null);
   const [error, setError] = useState("");
   const [mounted, setMounted] = useState(false);
+  // Members have a monthly quota; internal staff don't. null means "not a
+  // member" or "not loaded yet" — QuotaBadge renders nothing either way,
+  // rather than flashing a number a client could misread as their balance.
+  const isMember = role === "member";
+  const [usage, setUsage] = useState(null);
   // Identifies the current run, so a late-resolving cache write can tell
   // whether the report it saved is still the one on screen.
   const runIdRef = useRef(0);
@@ -42,6 +48,17 @@ function AuditApp({ userEmail }) {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Read-only quota fetch. GET never spends anything (see api/member-credit).
+  useEffect(() => {
+    if (!isMember) return;
+    let cancelled = false;
+    fetch("/api/member-credit")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d) setUsage(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isMember]);
 
   if (!mounted) return null;
 
@@ -85,6 +102,37 @@ function AuditApp({ userEmail }) {
         }
       }
     } catch(e) { console.warn("Cache check failed:", e.message); }
+
+    // Members must reserve one of their monthly audits before any paid work
+    // happens. Internal staff skip this entirely. A cache hit above already
+    // returned, so a member is never charged for a report we already had.
+    let auditToken = null;
+    if (isMember) {
+      setStatus("Checking your available audits…");
+      try {
+        const creditRes = await fetch("/api/member-credit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: normalizedUrl }),
+        });
+        const credit = await creditRes.json();
+        if (!creditRes.ok || !credit.allowed) {
+          setUsage({ used: credit.limit, remaining: 0, limit: credit.limit });
+          setError(
+            `You've used all ${credit.limit ?? ""} of your audits for this month. ` +
+            `Your quota resets on the 1st.`
+          );
+          setLoading(false);
+          return;
+        }
+        auditToken = credit.auditToken;
+        setUsage({ used: credit.used, remaining: credit.remaining, limit: credit.limit });
+      } catch (e) {
+        setError("Could not reserve an audit. Please try again shortly.");
+        setLoading(false);
+        return;
+      }
+    }
 
     setStatus("Researching website…");
 
@@ -155,7 +203,7 @@ Return ONLY valid JSON. No commentary before or after.`;
         const response = await fetch("/api/audit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages, system: systemPrompt, url: normalizedUrl })
+          body: JSON.stringify({ messages, system: systemPrompt, url: normalizedUrl, auditToken })
         });
         const responseText = await response.text();
         let dataParsed;
@@ -207,7 +255,9 @@ Return ONLY valid JSON. No commentary before or after.`;
       });
 
       // Fetch real Ahrefs keyword data via server-side route (key in env vars)
-      if (parsed.target_keywords?.items?.length > 0) {
+      // Internal-only: /api/ahrefs-keywords is role-gated because it spends
+      // Ahrefs quota. Skipping the call for members avoids a guaranteed 403.
+      if (!isMember && parsed.target_keywords?.items?.length > 0) {
         try {
           const kwList = parsed.target_keywords.items.map(k => k.keyword).join(", ");
           const kwResponse = await fetch("/api/ahrefs-keywords", {
@@ -252,6 +302,18 @@ Return ONLY valid JSON. No commentary before or after.`;
         .then(data => { if (runIdRef.current === runId) setAuditId(data?.auditId || null); })
         .catch(e => console.warn("Cache save failed:", e.message));
     } catch(e) {
+      // Give the member their audit back — the run they paid for failed.
+      if (auditToken) {
+        fetch("/api/refund-credit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ auditToken }),
+        })
+          .then(() => fetch("/api/member-credit"))
+          .then((r) => (r?.ok ? r.json() : null))
+          .then((d) => { if (d) setUsage(d); })
+          .catch(() => {});
+      }
       setError(e.message || "Something went wrong.");
     } finally { setLoading(false); }
   };
@@ -269,6 +331,7 @@ Return ONLY valid JSON. No commentary before or after.`;
       <AppHeader
         right={
           <>
+            <QuotaBadge usage={isMember ? usage : null} />
             {userEmail && <span title="Signed in" style={{ color: BRAND.muted, fontSize: 13 }}>{userEmail}</span>}
             <GhostButton href="/api/auth/logout" style={{ padding: "8px 16px", fontSize: 13 }}>Sign out</GhostButton>
           </>
@@ -277,7 +340,7 @@ Return ONLY valid JSON. No commentary before or after.`;
 
       {/* Hero band */}
       <div style={{ background: BRAND.groundDark, padding:`clamp(2rem, 5vw, 3.5rem) ${BRAND.sectionPaddingInline}` }}>
-        <Kicker onDark>Internal Tool</Kicker>
+        <Kicker onDark>{isMember ? "Member Access" : "Internal Tool"}</Kicker>
         <h1 style={{ fontFamily: BRAND.fontDisplay, color: BRAND.inkOnDark,
           fontSize: BRAND.textH1Fluid, fontWeight:700, letterSpacing:"-0.02em", lineHeight: 1.06, marginTop:18, marginBottom:14, maxWidth:"20ch" }}>
           AI Visibility Audit
@@ -339,11 +402,11 @@ Return ONLY valid JSON. No commentary before or after.`;
   );
 }
 
-export default function App({ userEmail }) {
+export default function App({ userEmail, role }) {
   return (
     <>
       <Head><title>{AGENCY.toolName} | {AGENCY.name}</title></Head>
-      <AuditApp userEmail={userEmail} />
+      <AuditApp userEmail={userEmail} role={role} />
     </>
   );
 }
@@ -357,5 +420,8 @@ export async function getServerSideProps({ req }) {
   if (!session) {
     return { redirect: { destination: "/login", permanent: false } };
   }
-  return { props: { userEmail: session.email } };
+  // role drives the quota UI only. Every limit it implies is enforced
+  // server-side in /api/audit and /api/member-credit — a tampered prop
+  // changes what the page renders, never what an account may actually do.
+  return { props: { userEmail: session.email, role: session.role } };
 }
