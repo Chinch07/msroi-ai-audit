@@ -1,5 +1,12 @@
+import { requireSession, ROLE } from '../../lib/auth';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // Internal-only endpoint: every call spends Ahrefs quota, so it's gated to
+  // staff rather than to any signed-in account. Members get the audit report
+  // without live Ahrefs keyword enrichment; the public /free-audit flow never
+  // reaches this at all.
+  if (!requireSession(req, res, { role: ROLE.INTERNAL })) return;
   const mcpKey = process.env.AHREFS_MCP_KEY;
   if (!mcpKey) return res.status(200).json({ items: [] });
   try {
@@ -17,15 +24,12 @@ export default async function handler(req, res) {
         model: 'claude-sonnet-4-5',
         max_tokens: 2000,
         mcp_servers: [{ type: 'url', url: 'https://api.ahrefs.com/mcp/mcp', name: 'ahrefs', authorization_token: mcpKey }],
-        messages: [{
-          role: 'user',
-          content: `Use the Ahrefs keywords explorer to get search metrics for: ${keywords}\n\nReturn ONLY a JSON array (no markdown):\n[{"keyword": "text", "volume": "2400/mo", "difficulty": 45, "intent": "informational"}, ...]\nUse real Ahrefs data. Difficulty = 0-100 integer.`
-        }]
+        messages: [{ role: 'user', content: `Use Ahrefs keywords explorer to get metrics for: ${keywords || ''}\n\nReturn ONLY a JSON array (no markdown):\n[{"keyword": "text", "volume": "2400/mo", "difficulty": 45, "intent": "informational"}, ...]\nReal Ahrefs data only. Difficulty = 0-100 integer.` }]
       })
     });
     const data = await response.json();
     const textBlocks = (data.content || []).filter(b => b.type === 'text');
-    const raw = textBlocks.map(b => b.text).join('').replace(/\`\`\`json\s*/gi,'').replace(/\`\`\`\s*/g,'').trim();
+    const raw = textBlocks.map(b => b.text).join('').replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
     const match = raw.match(/\[[\s\S]*\]/);
     if (!match) return res.status(200).json({ items: [] });
     return res.status(200).json({ items: JSON.parse(match[0]) });
